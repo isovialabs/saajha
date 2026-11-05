@@ -4,6 +4,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12-blue" />
   <img src="https://img.shields.io/badge/status-pilot-orange" />
+  <img src="https://github.com/Kingshre/saajha/actions/workflows/tests.yml/badge.svg" />
   <img src="https://img.shields.io/badge/data-Delhi%20live%20bus%20GPS-green" />
 </p>
 
