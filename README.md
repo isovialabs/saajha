@@ -62,4 +62,34 @@ DBSCAN suffers from *chaining*: shared corridors link unrelated routes, and it g
 - [x] Live bus GPS collector
 - [x] GPS cleaning
 - [x] Stop detection + evaluation
-- [x] Direction-aware route extraction +
+- [x] Direction-aware route extraction + evaluation
+- [x] Installable Python package
+- [x] Command-line pipeline (`saajha collect | stops | routes`)
+- [ ] Pilot e-rickshaw data collection around one Delhi metro station
+- [ ] GTFS export + public web map
+
+## Usage
+
+    pip install -e .
+    saajha collect --minutes 60                    # record live bus GPS (needs OTD_API_KEY in .env)
+    saajha stops --gtfs data/raw/delhi_bus_gtfs    # detect stops and score them
+    saajha routes                                  # extract direction-aware routes and score them
+
+Results are written to `data/processed/`. Run the tests with `pytest`.
+
+## Repository structure
+
+    src/saajha/  reusable pipeline code
+    notebooks/   exploration and experiments
+    docs/        figures
+    data/        raw and processed data (not committed)
+
+## Data and credits
+
+- Live bus GPS: [Open Transit Data Delhi](https://otd.delhi.gov.in) (Department of Transport, GNCTD and IIIT-Delhi)
+- Bus GTFS (2023): Delhi Transport Corporation, via the Transitland archive
+- Map data and traffic signals: © OpenStreetMap contributors
+
+## Ethics
+
+E-rickshaw data collection will record vehicle routes only. No photos of drivers' faces or license plates are collected.
