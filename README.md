@@ -57,6 +57,28 @@ DBSCAN suffers from *chaining*: shared corridors link unrelated routes, and it g
 <p align="center"><img src="docs/routes_avg.png" width="720" /></p>
 <p align="center"><i>The 8 largest route clusters discovered from raw bus GPS</i></p>
 
+## Finding: where Delhi Metro's last-mile gap is
+
+Before collecting e-rickshaw data, I asked which metro stations buses actually serve. For 154 metro stations inside Delhi, I measured live buses passing within 300 m during one hour of morning rush (6,122 buses), and checked whether nearby official bus stops were served.
+
+**Two kinds of gap:**
+
+| Gap | Stations | What the data shows |
+|---|---|---|
+| No bus network nearby | Chawri Bazar, Jasola Vihar Shaheen Bagh, Yamuna Bank | No official bus stop within 500 m, no live buses |
+| Buses nearby, but not at the station | Dwarka Sectors 11–14, Mayur Vihar (Pocket I, Phase I, Extension), New Ashok Nagar, Karkarduma Court | 0–15 buses/hr at the station, yet **every** bus stop within 500 m was served |
+
+For comparison, the median station saw ~91 buses/hr and the busiest over 300. In the second group, the bus network runs 300–500 m away but doesn't meet the metro. Both are where shared e-rickshaws operate, and they're Saajha's pilot candidates.
+
+<p align="center"><img src="docs/last_mile_gaps.png" width="720" /></p>
+<p align="center"><i>Bus service at Delhi Metro stations (red = worst-served quarter; size = buses per hour)</i></p>
+
+**Data checks:**
+- The live feed reached 95% of Delhi's official bus stops in the hour, so gaps are not caused by missing feed coverage.
+- The station dataset (Kaggle, 2020) had bad coordinates. Placeholders and misplaced stations were removed automatically by cross-checking against bus stop names, 9 were corrected by hand against Wikipedia, and 4 non-Delhi stations were dropped. All fixes are recorded in `notebooks/05_last_mile_gaps.ipynb`.
+
+**Limits:** one morning-rush hour only; stations opened after 2020 are missing; the airport station is an exception (buses use terminal bays, not street stops).
+
 ## Roadmap
 
 - [x] Live bus GPS collector
@@ -65,6 +87,8 @@ DBSCAN suffers from *chaining*: shared corridors link unrelated routes, and it g
 - [x] Direction-aware route extraction + evaluation
 - [x] Installable Python package
 - [x] Command-line pipeline (`saajha collect | stops | routes`)
+- [x] Last-mile gap analysis of Delhi Metro stations
+- [ ] Night-time service comparison
 - [ ] Pilot e-rickshaw data collection around one Delhi metro station
 - [ ] GTFS export + public web map
 
