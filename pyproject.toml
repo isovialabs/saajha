@@ -9,7 +9,7 @@ description = "Mapping Delhi's shared e-rickshaw network with GPS traces and ML"
 requires-python = ">=3.10"
 dependencies = [
   "pandas", "numpy", "scipy", "scikit-learn", "folium", "matplotlib",
-  "requests", "python-dotenv", "gtfs-realtime-bindings", "osmnx",
+  "requests", "python-dotenv", "gtfs-realtime-bindings", "osmnx", "gpxpy"
 ]
 
 [project.optional-dependencies]

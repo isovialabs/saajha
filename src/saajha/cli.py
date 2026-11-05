@@ -30,6 +30,11 @@ def cmd_collect(args):
     collect(minutes=args.minutes, interval=args.interval)
 
 
+def cmd_import_gpx(args):
+    from saajha.gpx import import_gpx
+    import_gpx(args.folder, args.out, seconds=args.resample)
+
+
 def cmd_stops(args):
     from saajha.stops import detect_stops, find_dwell_points, score_stops
     stops = detect_stops(find_dwell_points(load_clean(args.positions)), min_vehicles=args.min_vehicles)
@@ -44,7 +49,7 @@ def cmd_stops(args):
 
 def cmd_routes(args):
     from saajha.routes import cluster_routes, moving_vehicles, score_routes, trace_tokens
-    trace = moving_vehicles(load_clean(args.positions))
+    trace = moving_vehicles(load_clean(args.positions), min_span_km=args.min_span_km)
     tokens = trace_tokens(trace, use_direction=not args.no_direction)
     labels = cluster_routes(tokens, threshold=args.threshold)
     PROCESSED.mkdir(parents=True, exist_ok=True)
@@ -67,6 +72,12 @@ def main():
     c.add_argument("--interval", type=int, default=30, help="seconds between polls")
     c.set_defaults(func=cmd_collect)
 
+    g = sub.add_parser("import-gpx", help="convert phone GPX rides into a positions CSV")
+    g.add_argument("folder", help="folder of .gpx files, one per ride")
+    g.add_argument("--out", default="data/raw/rides.csv")
+    g.add_argument("--resample", type=int, default=15, help="seconds between kept points")
+    g.set_defaults(func=cmd_import_gpx)
+
     s = sub.add_parser("stops", help="detect stops from GPS traces")
     s.add_argument("--positions", help="CSV of positions (default: latest in data/raw)")
     s.add_argument("--gtfs", help="GTFS folder to score against, e.g. data/raw/delhi_bus_gtfs")
@@ -77,6 +88,7 @@ def main():
     r.add_argument("--positions", help="CSV of positions (default: latest in data/raw)")
     r.add_argument("--threshold", type=float, default=0.7)
     r.add_argument("--no-direction", action="store_true", help="ignore travel direction")
+    r.add_argument("--min-span-km", type=float, default=2.0, help="skip traces shorter than this")
     r.set_defaults(func=cmd_routes)
 
     args = p.parse_args()
