@@ -16,3 +16,5 @@ Data: ~1 hour of live positions for ~5,900 Delhi buses, scored against the offic
 Next: filter out traffic signals using OpenStreetMap.
 
 Removing detections within 40 m of an OpenStreetMap traffic signal raised precision from 49% to 53% (within 50 m) and from 71% to 75% (within 100 m), at the cost of 87 stops. Gains are limited because OSM maps only ~1,500 signals in Delhi, far fewer than actually exist.
+
+![Route clusters from live Delhi bus GPS](docs/routes_avg.png)
