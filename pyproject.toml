@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "saajha"
+version = "0.1.0"
+description = "Mapping Delhi's shared e-rickshaw network with GPS traces and ML"
+requires-python = ">=3.10"
+dependencies = [
+  "pandas", "numpy", "scipy", "scikit-learn", "folium", "matplotlib",
+  "requests", "python-dotenv", "gtfs-realtime-bindings", "osmnx",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "nbstripout"]
+
+[project.scripts]
+saajha = "saajha.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
