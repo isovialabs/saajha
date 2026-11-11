@@ -91,7 +91,8 @@ For comparison, the median station saw ~91 buses/hr and the busiest over 300. In
 - [x] Last-mile gap analysis of Delhi Metro stations
 - [ ] Night-time service comparison
 - [ ] Pilot e-rickshaw data collection around one Delhi metro station
-- [ ] GTFS export + public web map
+- [x] GTFS export (`saajha export-gtfs`)
+- [ ] Publish an open GTFS feed of e-rickshaw routes
 
 ## Usage
 
@@ -99,6 +100,7 @@ For comparison, the median station saw ~91 buses/hr and the busiest over 300. In
     saajha collect --minutes 60                    # record live bus GPS (needs OTD_API_KEY in .env)
     saajha stops --gtfs data/raw/delhi_bus_gtfs    # detect stops and score them
     saajha routes                                  # extract direction-aware routes and score them
+    saajha export-gtfs                             # detect stops and routes, write a GTFS feed
 
 Results are written to `data/processed/`. Run the tests with `pytest`.
 
