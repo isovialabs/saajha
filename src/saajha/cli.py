@@ -77,6 +77,14 @@ def cmd_export_gtfs(args):
           f"fewer than 2 stops) -> {s['zip']}")
 
 
+def cmd_summarize(args):
+    from saajha.service import load_stations, update_service
+    s = update_service(args.out, args.slot, load_clean(args.positions), load_stations(args.stations))
+    gaps = [g for _, g in s["stations"].values()]
+    print(f"{args.slot}: {s['n_days']} day(s), Delhi {s['window']}, ~{s['vehicles']:,} buses | "
+          f"{gaps.count('none')} no bus nearby, {gaps.count('missed')} bus misses station -> {args.out}")
+
+
 def main():
     p = argparse.ArgumentParser(prog="saajha", description="Map informal transit routes from GPS traces.")
     sub = p.add_subparsers(dest="command", required=True)
@@ -114,6 +122,13 @@ def main():
     x.add_argument("--agency", default="Saajha")
     x.add_argument("--route-type", type=int, default=3, help="GTFS route_type (3 = bus)")
     x.set_defaults(func=cmd_export_gtfs)
+
+    m = sub.add_parser("summarize", help="add bus service at metro stations to the site's service.json")
+    m.add_argument("--slot", required=True, choices=["morning", "midday", "night"])
+    m.add_argument("--positions", help="CSV of positions (default: latest in data/raw)")
+    m.add_argument("--stations", default="docs/stations.geojson")
+    m.add_argument("--out", default="docs/service.json")
+    m.set_defaults(func=cmd_summarize)
 
     args = p.parse_args()
     args.func(args)

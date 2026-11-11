@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Saajha · Record a ride</title>
+  <meta name="description" content="Record a shared e-rickshaw ride in Delhi to help map routes that no map shows." />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #faf8f5; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e6e2dc;
+      --go: #2f8f5b; --stop: #c0392b; --mark: #e08a1e; --accent: #1f4e8c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #141416; --panel: #1d1d20; --ink: #ececef; --muted: #a0a0a8; --line: #2e2e33; --accent: #7fa8e0; }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 520px; margin: 0 auto; padding: 20px 16px 40px; }
+    h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+    .sub { margin: 2px 0 16px; color: var(--muted); }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+    .hi { display: block; font-size: 13px; color: var(--muted); font-weight: 400; }
+    button { width: 100%; border: 0; border-radius: 12px; padding: 16px; font-family: inherit;
+      font-size: 18px; font-weight: 600; line-height: 1.25; color: #fff; cursor: pointer; }
+    button .hi { color: rgba(255, 255, 255, 0.88); font-size: 14px; margin-top: 2px; }
+    button + button { margin-top: 10px; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    .go { background: var(--go); } .stop { background: var(--stop); } .mark { background: var(--mark); }
+    .ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-size: 16px; font-weight: 500; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+    .stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+    .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+    .stat span { font-size: 12px; color: var(--muted); }
+    #map { height: 240px; border-radius: 12px; margin-top: 12px; display: none; }
+    #status { font-size: 14px; color: var(--muted); margin-top: 10px; min-height: 21px; }
+    #status.warn { color: var(--stop); }
+    label { display: block; font-weight: 600; margin: 12px 0 4px; }
+    input, select, textarea { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--bg); color: var(--ink); font-family: inherit; font-size: 16px; }
+    .hidden { display: none; }
+    ol { padding-left: 20px; margin: 0; } li { margin-bottom: 6px; }
+    small, .note { color: var(--muted); font-size: 13px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Saajha</h1>
+  <p class="sub">Record a shared e-rickshaw ride · <span lang="hi">ई-रिक्शा सवारी रिकॉर्ड करें</span></p>
+
+  <!-- 1. Before the ride -->
+  <section id="intro" class="card">
+    <ol>
+      <li>Get on a <b>shared e-rickshaw</b> near a metro station.</li>
+      <li>Tap <b>Start ride</b> and keep this screen open until you get off.</li>
+      <li>Tap <b>Pickup / drop</b> whenever the rickshaw stops for passengers.</li>
+      <li>At the end, add the fare and send the ride.</li>
+    </ol>
+    <p class="note">Your location stays on your phone until you choose to send the ride. Nothing is uploaded automatically.</p>
+    <button class="go" id="start">Start ride<span class="hi">सवारी शुरू करें</span></button>
+    <div id="resume" class="hidden">
+      <button class="ghost" id="resumeBtn">Resume unfinished ride</button>
+    </div>
+  </section>
+
+  <!-- 2. During the ride -->
+  <section id="riding" class="card hidden">
+    <div class="stats">
+      <div class="stat"><b id="t">0:00</b><span>time</span></div>
+      <div class="stat"><b id="d">0.00</b><span>km</span></div>
+      <div class="stat"><b id="m">0</b><span>stops marked</span></div>
+    </div>
+    <button class="mark" id="markBtn">Pickup / drop<span class="hi">सवारी चढ़ी / उतरी</span></button>
+    <button class="stop" id="endBtn">End ride<span class="hi">सवारी खत्म करें</span></button>
+    <div id="status"></div>
+    <div id="map"></div>
+  </section>
+
+  <!-- 3. After the ride -->
+  <section id="details" class="card hidden">
+    <h2 style="margin:0 0 4px;font-size:20px">About this ride</h2>
+    <small id="summary"></small>
+
+    <label for="station">Metro station you started near</label>
+    <select id="station"><option value="">Choose a station…</option></select>
+
+    <label for="fare">Fare paid (₹)</label>
+    <input id="fare" type="number" inputmode="numeric" min="0" placeholder="e.g. 10" />
+
+    <label for="wait">How long did you wait for it to leave? (minutes)</label>
+    <input id="wait" type="number" inputmode="numeric" min="0" placeholder="e.g. 5" />
+
+    <label for="dest">Where did it go? (route or last stop, as people call it)</label>
+    <input id="dest" type="text" placeholder="e.g. Sector 7 market" />
+
+    <label for="notes">Anything else? (optional)</label>
+    <textarea id="notes" rows="2" placeholder="e.g. full by 6 passengers, lit road, late night"></textarea>
+
+    <button class="go" id="shareBtn" style="margin-top:16px">Send ride<span class="hi">सवारी भेजें</span></button>
+    <button class="ghost" id="downloadBtn">Save file instead</button>
+    <button class="ghost" id="discardBtn">Discard ride</button>
+    <div id="done" class="note hidden" style="margin-top:10px"></div>
+  </section>
+
+  <p class="note">Part of <a href="../">Saajha</a>, an open map of Delhi's shared e-rickshaw routes.</p>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const KEY = "saajha-ride";
+  const MAX_ACCURACY_M = 50;   // ignore fixes worse than this
+  const $ = (id) => document.getElementById(id);
+
+  let ride = null;        // { started, points: [{lat, lon, t, acc}], marks: [{lat, lon, t}] }
+  let watchId = null, timer = null, wakeLock = null, map = null, line = null, here = null;
+
+  const store = {
+    save() { try { localStorage.setItem(KEY, JSON.stringify(ride)); } catch (e) {} },
+    load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } },
+    clear() { try { localStorage.removeItem(KEY); } catch (e) {} },
+  };
+
+  function show(id) {
+    for (const s of ["intro", "riding", "details"]) $(s).classList.toggle("hidden", s !== id);
+  }
+  function status(msg, warn = false) { $("status").textContent = msg; $("status").classList.toggle("warn", warn); }
+
+  function km(points) {
+    let d = 0;
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1], b = points[i];
+      const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+      d += 12742 * Math.asin(Math.sqrt(h));
+    }
+    return d;
+  }
+  function clock(ms) {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+  function refresh() {
+    $("t").textContent = clock(Date.now() - ride.started);
+    $("d").textContent = km(ride.points).toFixed(2);
+    $("m").textContent = ride.marks.length;
+  }
+
+  async function keepAwake() {
+    try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) { /* not supported */ }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && ride && watchId !== null) keepAwake();
+    if (document.visibilityState === "hidden" && ride && watchId !== null) store.save();
+  });
+
+  function initMap() {
+    $("map").style.display = "block";
+    if (map) return;
+    map = L.map("map", { zoomControl: false, attributionControl: true });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: "© OpenStreetMap",
+    }).addTo(map);
+    line = L.polyline([], { color: "#2f8f5b", weight: 5 }).addTo(map);
+  }
+
+  function onFix(pos) {
+    const { latitude: lat, longitude: lon, accuracy: acc } = pos.coords;
+    if (acc > MAX_ACCURACY_M) { status(`Waiting for a better GPS signal (±${Math.round(acc)} m)…`, true); return; }
+    ride.points.push({ lat, lon, t: pos.timestamp, acc: Math.round(acc) });
+    status(`Recording · GPS ±${Math.round(acc)} m`);
+    initMap();
+    line.addLatLng([lat, lon]);
+    if (!here) here = L.circleMarker([lat, lon], { radius: 7, color: "#1f4e8c", fillOpacity: 1 }).addTo(map);
+    here.setLatLng([lat, lon]);
+    map.setView([lat, lon], Math.max(map.getZoom() || 16, 15));
+    if (ride.points.length % 10 === 0) store.save();
+    refresh();
+  }
+  function onError(err) {
+    const msg = err.code === 1
+      ? "Location permission was denied. Allow location for this site in your browser settings, then reload."
+      : "Can't get a GPS fix yet. Try moving to an open spot.";
+    status(msg, true);
+  }
+
+  function startWatching() {
+    if (!("geolocation" in navigator)) { status("This browser can't share location.", true); return; }
+    show("riding");
+    status("Getting your location…");
+    watchId = navigator.geolocation.watchPosition(onFix, onError, {
+      enableHighAccuracy: true, maximumAge: 0, timeout: 20000,
+    });
+    timer = setInterval(refresh, 1000);
+    keepAwake();
+    if (ride.points.length) { initMap(); line.setLatLngs(ride.points.map((p) => [p.lat, p.lon])); }
+    refresh();
+  }
+
+  $("start").onclick = () => {
+    ride = { started: Date.now(), points: [], marks: [] };
+    store.save();
+    startWatching();
+  };
+  $("resumeBtn").onclick = () => { ride = store.load(); startWatching(); };
+
+  $("markBtn").onclick = () => {
+    const p = ride.points[ride.points.length - 1];
+    if (!p) { status("No GPS fix yet, so the stop wasn't marked.", true); return; }
+    ride.marks.push({ lat: p.lat, lon: p.lon, t: Date.now() });
+    if (map) L.circleMarker([p.lat, p.lon], { radius: 6, color: "#e08a1e", fillOpacity: 1 }).addTo(map);
+    store.save();
+    refresh();
+    if (navigator.vibrate) navigator.vibrate(60);
+  };
+
+  $("endBtn").onclick = () => {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null; clearInterval(timer);
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    store.save();
+    if (ride.points.length < 2) {
+      status("Not enough GPS points were recorded. Keep the screen on during the ride and try again.", true);
+      show("riding");
+      return;
+    }
+    $("summary").textContent =
+      `${clock(Date.now() - ride.started)} · ${km(ride.points).toFixed(2)} km · ${ride.points.length} GPS points · ${ride.marks.length} stops marked`;
+    show("details");
+  };
+
+  const esc = (s) => String(s).replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[c]));
+
+  function buildGpx() {
+    const meta = {
+      app: "saajha-recorder/1",
+      station: $("station").value, fare_inr: $("fare").value, wait_min: $("wait").value,
+      destination: $("dest").value.trim(), notes: $("notes").value.trim(),
+      stops_marked: ride.marks.length,
+    };
+    const iso = (t) => new Date(t).toISOString();
+    const wpts = ride.marks.map((m) =>
+      `  <wpt lat="${m.lat.toFixed(6)}" lon="${m.lon.toFixed(6)}"><time>${iso(m.t)}</time><name>stop</name></wpt>`).join("\n");
+    const trkpts = ride.points.map((p) =>
+      `      <trkpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><time>${iso(p.t)}</time></trkpt>`).join("\n");
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Saajha ride recorder" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>Saajha ride</name><time>${iso(ride.started)}</time></metadata>
+${wpts}
+  <trk>
+    <name>Saajha ride</name>
+    <desc>${esc(JSON.stringify(meta))}</desc>
+    <trkseg>
+${trkpts}
+    </trkseg>
+  </trk>
+</gpx>
+`;
+  }
+  function fileName() {
+    const d = new Date(ride.started), p = (n) => String(n).padStart(2, "0");
+    return `ride_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.gpx`;
+  }
+  function download(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  function finished(msg) {
+    $("done").textContent = msg; $("done").classList.remove("hidden");
+    store.clear();
+  }
+
+  $("shareBtn").onclick = async () => {
+    const name = fileName();
+    const file = new File([buildGpx()], name, { type: "application/gpx+xml" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "Saajha ride", text: "E-rickshaw ride for Saajha" });
+        finished("Sent. Thank you! You can record another ride any time.");
+        return;
+      } catch (e) {
+        if (e.name === "AbortError") return;   // user closed the share sheet
+      }
+    }
+    download(file, name);
+    finished(`Saved as ${name}. Send that file to whoever asked you to record. Thank you!`);
+  };
+  $("downloadBtn").onclick = () => {
+    download(new Blob([buildGpx()], { type: "application/gpx+xml" }), fileName());
+    finished("Saved. Thank you!");
+  };
+  $("discardBtn").onclick = () => {
+    if (!confirm("Discard this ride?")) return;
+    store.clear(); ride = null; location.reload();
+  };
+
+  // stations for the dropdown
+  fetch("../stations.geojson").then((r) => r.json()).then((geo) => {
+    const names = geo.features.map((f) => f.properties.name).sort();
+    const sel = $("station");
+    for (const n of [...names, "Other / not near a metro station"]) {
+      const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o);
+    }
+  }).catch(() => {});
+
+  // offer to resume a ride interrupted by a reload or a closed tab
+  const saved = store.load();
+  if (saved && saved.points && saved.points.length) $("resume").classList.remove("hidden");
+</script>
+</body>
+</html>

@@ -36,6 +36,14 @@
     .worst li { margin-bottom: 4px; cursor: pointer; }
     .worst li:hover { color: var(--accent); }
     .worst em { color: var(--muted); font-style: normal; font-variant-numeric: tabular-nums; }
+    .slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px;
+      background: var(--bg); border: 1px solid var(--line); border-radius: 12px; margin: 14px 0 6px; }
+    .slots button { border: 0; border-radius: 9px; padding: 8px 4px; background: transparent; color: var(--muted);
+      font: inherit; font-weight: 600; cursor: pointer; }
+    .slots button[aria-selected="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+    .slots button:disabled { opacity: 0.4; cursor: default; }
+    .source { font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+    .hidden { display: none; }
     .soon { border: 1px dashed var(--line); border-radius: 10px; padding: 12px; color: var(--muted); }
     footer { margin-top: 28px; font-size: 12px; color: var(--muted); }
     a { color: var(--accent); }
@@ -55,7 +63,12 @@
       <p class="sub">Mapping Delhi's shared e-rickshaw network</p>
 
       <p>Delhi's metro is world-class, but many trips end at a station exit with no bus in sight. That last stretch is run by shared e-rickshaws on informal routes that no map shows.</p>
-      <p>This map shows how well buses actually serve each metro station, measured from one hour of live GPS from ~6,000 Delhi buses.</p>
+      <p>This map shows how well buses actually serve each metro station, measured from live GPS of Delhi's buses.</p>
+
+      <div class="slots hidden" id="slots" role="tablist" aria-label="Time of day">
+        <button data-slot="morning">Morning</button><button data-slot="midday">Midday</button><button data-slot="night">Night</button>
+      </div>
+      <p class="source" id="source">One hour of morning rush, ~6,000 buses.</p>
 
       <div class="stats">
         <div class="stat"><b id="s-total">–</b><span>stations</span></div>
@@ -78,7 +91,7 @@
 
       <footer>
         Method, code and caveats: <a href="https://github.com/isovialabs/saajha">github.com/isovialabs/saajha</a><br />
-        One morning-rush hour of data; station list from 2020 with manual corrections.<br />
+        Bus service is re-measured automatically three times a day. Station list from 2020 with manual corrections.<br />
         Data: Open Transit Data Delhi (GNCTD &amp; IIIT-Delhi) · map © OpenStreetMap contributors
       </footer>
     </aside>
@@ -89,6 +102,8 @@
   <script>
     const COLORS = { none: "#c0392b", missed: "#e08a1e", served: "#2f8f5b" };
     const LABELS = { none: "No bus network nearby", missed: "Buses nearby, not at the station", served: "Well served" };
+    const SLOT_NAMES = { morning: "morning rush", midday: "midday", night: "night" };
+    const $ = (id) => document.getElementById(id);
 
     const map = L.map("map", { zoomControl: true }).setView([28.62, 77.17], 11);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -97,56 +112,83 @@
     }).addTo(map);
 
     const radius = (b) => 4 + Math.min(b, 200) / 25;
+    let stations = [];        // [{name, lat, lon, stops, bph, gap}]
     const markers = {};
+
+    function render() {
+      const order = { served: 0, missed: 1, none: 2 };
+      for (const st of [...stations].sort((a, b) => order[a.gap] - order[b.gap])) {
+        let m = markers[st.name];
+        if (!m) {
+          m = markers[st.name] = L.circleMarker([st.lat, st.lon], { weight: 2, fillOpacity: 0.35 }).addTo(map);
+        }
+        m.setStyle({ color: COLORS[st.gap], fillColor: COLORS[st.gap] });
+        m.setRadius(radius(st.bph));
+        m.bindPopup(`<b>${st.name}</b><br>${LABELS[st.gap]}<br>` +
+          `${Math.round(st.bph)} buses/hr within 300 m<br>${st.stops} bus stops within 500 m`);
+        m.bringToFront();
+      }
+      const count = (g) => stations.filter((s) => s.gap === g).length;
+      $("s-total").textContent = stations.length;
+      $("s-none").textContent = count("none");
+      $("s-missed").textContent = count("missed");
+
+      const ol = $("worst");
+      ol.innerHTML = "";
+      for (const st of [...stations].sort((a, b) => a.bph - b.bph).slice(0, 10)) {
+        const li = document.createElement("li");
+        li.innerHTML = `${st.name} <em>${Math.round(st.bph)}/hr</em>`;
+        li.onclick = () => {
+          if (window.innerWidth <= 760) window.scrollTo({ top: 0, behavior: "smooth" });
+          map.setView([st.lat, st.lon], 15);
+          markers[st.name].openPopup();
+        };
+        ol.appendChild(li);
+      }
+    }
+
+    function useSlot(service, slot) {
+      const s = service.slots[slot];
+      for (const st of stations) {
+        const v = s.stations[st.name];
+        if (v) { st.bph = v[0]; st.gap = v[1]; }
+      }
+      for (const b of document.querySelectorAll("#slots button"))
+        b.setAttribute("aria-selected", String(b.dataset.slot === slot));
+      const days = s.n_days === 1 ? "1 day" : `last ${s.n_days} days`;
+      $("source").textContent = `Delhi ${s.window}, ${SLOT_NAMES[slot]} · ~${s.vehicles.toLocaleString()} buses · averaged over ${days}`;
+      try { localStorage.setItem("saajha-slot", slot); } catch (e) {}
+      render();
+    }
 
     fetch("stations.geojson")
       .then((r) => r.json())
       .then((geo) => {
-        const feats = geo.features;
-        // draw well-served first so problem stations sit on top
-        const order = { served: 0, missed: 1, none: 2 };
-        feats.sort((a, b) => order[a.properties.gap] - order[b.properties.gap]);
-
-        for (const f of feats) {
-          const p = f.properties;
-          const [lon, lat] = f.geometry.coordinates;
-          const m = L.circleMarker([lat, lon], {
-            radius: radius(p.buses_per_hour), color: COLORS[p.gap], weight: 2,
-            fillColor: COLORS[p.gap], fillOpacity: 0.35,
-          }).addTo(map);
-          m.bindPopup(
-            `<b>${p.name}</b><br>${LABELS[p.gap]}<br>` +
-            `${Math.round(p.buses_per_hour)} buses/hr within 300 m<br>` +
-            `${p.bus_stops_500m} bus stops within 500 m`
-          );
-          markers[p.name] = m;
-        }
-
+        stations = geo.features.map((f) => ({
+          name: f.properties.name, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1],
+          stops: f.properties.bus_stops_500m, bph: f.properties.buses_per_hour, gap: f.properties.gap,
+        }));
+        render();
         map.fitBounds(L.featureGroup(Object.values(markers)).getBounds(), { padding: [20, 20] });
-
-        const count = (g) => feats.filter((f) => f.properties.gap === g).length;
-        document.getElementById("s-total").textContent = feats.length;
-        document.getElementById("s-none").textContent = count("none");
-        document.getElementById("s-missed").textContent = count("missed");
-
-        const worst = [...feats]
-          .sort((a, b) => a.properties.buses_per_hour - b.properties.buses_per_hour)
-          .slice(0, 10);
-        const ol = document.getElementById("worst");
-        for (const f of worst) {
-          const li = document.createElement("li");
-          li.innerHTML = `${f.properties.name} <em>${Math.round(f.properties.buses_per_hour)}/hr</em>`;
-          li.onclick = () => {
-            const [lon, lat] = f.geometry.coordinates;
-            if (window.innerWidth <= 760) window.scrollTo({ top: 0, behavior: "smooth" });
-            map.setView([lat, lon], 15);
-            markers[f.properties.name].openPopup();
-          };
-          ol.appendChild(li);
+        return fetch("service.json", { cache: "no-cache" });
+      })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((service) => {
+        if (!service || !service.slots) return;   // no automatic data yet: keep the original snapshot
+        const available = Object.keys(service.slots);
+        if (!available.length) return;
+        $("slots").classList.remove("hidden");
+        for (const b of document.querySelectorAll("#slots button")) {
+          b.disabled = !available.includes(b.dataset.slot);
+          b.onclick = () => useSlot(service, b.dataset.slot);
         }
+        let saved = null;
+        try { saved = localStorage.getItem("saajha-slot"); } catch (e) {}
+        const first = available.includes(saved) ? saved : ["morning", "midday", "night"].find((x) => available.includes(x));
+        useSlot(service, first);
       })
       .catch(() => {
-        document.getElementById("worst").innerHTML = "<li>Could not load station data.</li>";
+        if (!stations.length) $("worst").innerHTML = "<li>Could not load station data.</li>";
       });
   </script>
 </body>
