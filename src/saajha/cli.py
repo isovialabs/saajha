@@ -63,6 +63,20 @@ def cmd_routes(args):
               f"homogeneity {s['homogeneity']:.2f} | completeness {s['completeness']:.2f}")
 
 
+def cmd_export_gtfs(args):
+    from saajha.gtfs import build_gtfs
+    from saajha.routes import cluster_routes, moving_vehicles, trace_tokens
+    from saajha.stops import detect_stops, find_dwell_points
+    clean = load_clean(args.positions)
+    stops = detect_stops(find_dwell_points(clean), min_vehicles=args.min_vehicles)
+    trace = moving_vehicles(clean, min_span_km=args.min_span_km)
+    labels = cluster_routes(trace_tokens(trace), threshold=args.threshold)
+    print(f"{len(stops):,} stops, {labels[labels >= 0].nunique():,} route clusters")
+    s = build_gtfs(trace, labels, stops, args.out, agency_name=args.agency, route_type=args.route_type)
+    print(f"GTFS: {s['routes']:,} routes, {s['stops']:,} stops ({s['skipped']:,} clusters skipped: "
+          f"fewer than 2 stops) -> {s['zip']}")
+
+
 def main():
     p = argparse.ArgumentParser(prog="saajha", description="Map informal transit routes from GPS traces.")
     sub = p.add_subparsers(dest="command", required=True)
@@ -90,6 +104,16 @@ def main():
     r.add_argument("--no-direction", action="store_true", help="ignore travel direction")
     r.add_argument("--min-span-km", type=float, default=2.0, help="skip traces shorter than this")
     r.set_defaults(func=cmd_routes)
+
+    x = sub.add_parser("export-gtfs", help="detect stops and routes, then write a GTFS feed")
+    x.add_argument("--positions", help="CSV of positions (default: latest in data/raw)")
+    x.add_argument("--out", default="data/processed/gtfs")
+    x.add_argument("--min-vehicles", type=int, default=3)
+    x.add_argument("--threshold", type=float, default=0.7)
+    x.add_argument("--min-span-km", type=float, default=2.0)
+    x.add_argument("--agency", default="Saajha")
+    x.add_argument("--route-type", type=int, default=3, help="GTFS route_type (3 = bus)")
+    x.set_defaults(func=cmd_export_gtfs)
 
     args = p.parse_args()
     args.func(args)
