@@ -77,9 +77,24 @@ def cmd_export_gtfs(args):
           f"fewer than 2 stops) -> {s['zip']}")
 
 
+def cmd_nearby(args):
+    from saajha.nearby import build_nearby, write_nearby
+    from saajha.service import load_stations
+    stations = load_stations(args.stations)
+    gtfs = pd.read_csv(Path(args.gtfs) / "stops.txt", dtype={"stop_id": str})
+    pos = load_clean(args.positions) if args.positions or glob.glob("data/raw/bus_positions_*.csv") else None
+    nearby = build_nearby(stations, gtfs, pos, radius_m=args.radius)
+    write_nearby(args.out, nearby)
+    counts = [len(v) for v in nearby["stations"].values()]
+    print(f"{len(counts)} stations, {sum(counts):,} nearby stops, {counts.count(0)} with none within "
+          f"{args.radius} m -> {args.out}")
+
+
 def cmd_summarize(args):
+    from saajha.nearby import load_nearby_stops
     from saajha.service import load_stations, update_service
-    s = update_service(args.out, args.slot, load_clean(args.positions), load_stations(args.stations))
+    s = update_service(args.out, args.slot, load_clean(args.positions), load_stations(args.stations),
+                       nearby_stops=load_nearby_stops(args.nearby))
     gaps = [g for _, g in s["stations"].values()]
     print(f"{args.slot}: {s['n_days']} day(s), Delhi {s['window']}, ~{s['vehicles']:,} buses | "
           f"{gaps.count('none')} no bus nearby, {gaps.count('missed')} bus misses station -> {args.out}")
@@ -123,11 +138,20 @@ def main():
     x.add_argument("--route-type", type=int, default=3, help="GTFS route_type (3 = bus)")
     x.set_defaults(func=cmd_export_gtfs)
 
+    n = sub.add_parser("nearby", help="list the bus stops within walking distance of each metro station")
+    n.add_argument("--gtfs", default="data/raw/delhi_bus_gtfs", help="GTFS folder with stops.txt")
+    n.add_argument("--positions", help="CSV of positions for buses/hr (default: latest in data/raw)")
+    n.add_argument("--stations", default="docs/stations.geojson")
+    n.add_argument("--out", default="docs/nearby.json")
+    n.add_argument("--radius", type=int, default=600, help="walking radius in metres")
+    n.set_defaults(func=cmd_nearby)
+
     m = sub.add_parser("summarize", help="add bus service at metro stations to the site's service.json")
     m.add_argument("--slot", required=True, choices=["morning", "midday", "night"])
     m.add_argument("--positions", help="CSV of positions (default: latest in data/raw)")
     m.add_argument("--stations", default="docs/stations.geojson")
     m.add_argument("--out", default="docs/service.json")
+    m.add_argument("--nearby", default="docs/nearby.json", help="also track buses at these stops, if the file exists")
     m.set_defaults(func=cmd_summarize)
 
     args = p.parse_args()

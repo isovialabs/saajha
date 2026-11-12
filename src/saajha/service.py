@@ -51,8 +51,9 @@ def classify(names, stops_500m, bph):
     return out
 
 
-def update_service(service_path, slot, pos, stations, keep_days=7):
-    """Add today's measurement for `slot` to service.json and recompute its averages."""
+def update_service(service_path, slot, pos, stations, keep_days=7, nearby_stops=None):
+    """Add today's measurement for `slot` to service.json and recompute its averages.
+    nearby_stops (stop_id, lat, lon): bus stops near stations whose service is tracked too."""
     path = Path(service_path)
     data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     data.setdefault("slots", {})
@@ -67,11 +68,16 @@ def update_service(service_path, slot, pos, stations, keep_days=7):
         "vehicles": int(pos.vehicle_id.nunique()),
         "bph": [round(float(x), 1) for x in bph],
     }
+    if nearby_stops is not None and len(nearby_stops):
+        from saajha.nearby import stop_buses_per_hour
+        sb = stop_buses_per_hour(pos, nearby_stops)
+        s["days"][start.strftime("%Y-%m-%d")]["stop_bph"] = {
+            str(i): round(float(v), 1) for i, v in zip(nearby_stops.stop_id, sb)}
     for day in sorted(s["days"])[:-keep_days]:      # keep only the most recent days
         del s["days"][day]
 
     names = stations.name.tolist()
-    days = [d for d in s["days"].values() if len(d["bph"]) == len(names)]  # skip days from an older station list
+    days = [s["days"][k] for k in sorted(s["days"]) if len(s["days"][k]["bph"]) == len(names)]  # skip days from an older station list
     avg = np.mean([d["bph"] for d in days], axis=0)
     gaps = classify(names, stations.bus_stops_500m.values, avg)
     s.update({
@@ -80,6 +86,10 @@ def update_service(service_path, slot, pos, stations, keep_days=7):
         "vehicles": int(np.mean([d["vehicles"] for d in days])),
         "stations": {n: [round(float(b), 1), g] for n, b, g in zip(names, avg, gaps)},
     })
+    stop_days = [d["stop_bph"] for d in days if "stop_bph" in d]
+    if stop_days:
+        ids = set().union(*stop_days)
+        s["stops"] = {i: round(float(np.mean([d[i] for d in stop_days if i in d])), 1) for i in sorted(ids)}
     data["updated_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     path.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     return s

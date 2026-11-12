@@ -49,6 +49,11 @@
     a { color: var(--accent); }
     .leaflet-popup-content { font: 14px/1.45 system-ui, sans-serif; }
     .leaflet-popup-content b { font-size: 15px; }
+    .leaflet-popup-content .near { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e6e2dc; }
+    .leaflet-popup-content .near b { font-size: 14px; }
+    .leaflet-popup-content .near ol { margin: 4px 0 0; padding-left: 18px; }
+    .leaflet-popup-content .near li { margin-bottom: 4px; }
+    .leaflet-popup-content .near small { display: block; color: #6b6b70; font-size: 12px; }
     @media (max-width: 760px) {
       .layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
       #map { height: 55vh; order: -1; }
@@ -104,16 +109,50 @@
     const LABELS = { none: "No bus network nearby", missed: "Buses nearby, not at the station", served: "Well served" };
     const SLOT_NAMES = { morning: "morning rush", midday: "midday", night: "night" };
     const $ = (id) => document.getElementById(id);
+    const esc = (t) => String(t).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
 
     const map = L.map("map", { zoomControl: true }).setView([28.62, 77.17], 11);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 18,
+      maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
 
     const radius = (b) => 4 + Math.min(b, 200) / 25;
     let stations = [];        // [{name, lat, lon, stops, bph, gap}]
+    let nearby = null;        // nearby.json: {radius_m, stations: {name: [{id, name, lat, lon, dist_m, walk_min, bph}]}}
+    let stopRate = null;      // buses/hr at nearby stops for the selected time of day
     const markers = {};
+    const stopLayer = L.layerGroup().addTo(map);
+
+    function popupHtml(st) {
+      let html = `<b>${esc(st.name)}</b><br>${LABELS[st.gap]}<br>` +
+        `${Math.round(st.bph)} buses/hr within 300 m of the station`;
+      if (nearby) {
+        const list = nearby.stations[st.name] || [];
+        if (!list.length) {
+          html += `<div class="near"><b>No bus stop within ${nearby.radius_m} m.</b></div>`;
+        } else {
+          html += `<div class="near"><b>Nearest bus stops</b><ol>` + list.map((b) => {
+            const rate = stopRate && b.id in stopRate ? stopRate[b.id] : b.bph;
+            const buses = rate === undefined ? "" : ` · ~${Math.round(rate)} buses/hr`;
+            return `<li>${esc(b.name)}<small>${b.dist_m} m · ~${b.walk_min} min walk${buses}</small></li>`;
+          }).join("") + `</ol></div>`;
+        }
+      }
+      html += `<div class="near"><b>E-rickshaw routes:</b> not mapped yet. ` +
+        `<a href="record/">Record a ride from here</a></div>`;
+      return html;
+    }
+
+    function showNearbyStops(st) {
+      stopLayer.clearLayers();
+      if (!nearby) return;
+      for (const b of nearby.stations[st.name] || []) {
+        L.polyline([[st.lat, st.lon], [b.lat, b.lon]], { color: "#1f4e8c", weight: 1.5, dashArray: "4 4", opacity: 0.7 }).addTo(stopLayer);
+        L.circleMarker([b.lat, b.lon], { radius: 5, color: "#1f4e8c", fillColor: "#fff", fillOpacity: 1, weight: 2 })
+          .bindTooltip(`${esc(b.name)} · ${b.dist_m} m`).addTo(stopLayer);
+      }
+    }
 
     function render() {
       const order = { served: 0, missed: 1, none: 2 };
@@ -121,11 +160,20 @@
         let m = markers[st.name];
         if (!m) {
           m = markers[st.name] = L.circleMarker([st.lat, st.lon], { weight: 2, fillOpacity: 0.35 }).addTo(map);
+          m.on("popupopen", () => {
+            showNearbyStops(st);
+            history.replaceState(null, "", "#" + encodeURIComponent(st.name));
+          });
+          m.on("popupclose", () => {
+            stopLayer.clearLayers();
+            history.replaceState(null, "", location.pathname + location.search);
+          });
         }
         m.setStyle({ color: COLORS[st.gap], fillColor: COLORS[st.gap] });
         m.setRadius(radius(st.bph));
-        m.bindPopup(`<b>${st.name}</b><br>${LABELS[st.gap]}<br>` +
-          `${Math.round(st.bph)} buses/hr within 300 m<br>${st.stops} bus stops within 500 m`);
+        m.bindPopup(() => popupHtml(st), {
+          maxWidth: 300, maxHeight: Math.max(160, map.getSize().y - 90), autoPanPadding: [16, 16],
+        });
         m.bringToFront();
       }
       const count = (g) => stations.filter((s) => s.gap === g).length;
@@ -137,14 +185,18 @@
       ol.innerHTML = "";
       for (const st of [...stations].sort((a, b) => a.bph - b.bph).slice(0, 10)) {
         const li = document.createElement("li");
-        li.innerHTML = `${st.name} <em>${Math.round(st.bph)}/hr</em>`;
-        li.onclick = () => {
-          if (window.innerWidth <= 760) window.scrollTo({ top: 0, behavior: "smooth" });
-          map.setView([st.lat, st.lon], 15);
-          markers[st.name].openPopup();
-        };
+        li.innerHTML = `${esc(st.name)} <em>${Math.round(st.bph)}/hr</em>`;
+        li.onclick = () => openStation(st.name);
         ol.appendChild(li);
       }
+    }
+
+    function openStation(name) {
+      const st = stations.find((s) => s.name === name);
+      if (!st) return;
+      if (window.innerWidth <= 760) window.scrollTo({ top: 0, behavior: "smooth" });
+      map.setView([st.lat, st.lon], 16, { animate: false });
+      markers[st.name].openPopup();
     }
 
     function useSlot(service, slot) {
@@ -153,6 +205,7 @@
         const v = s.stations[st.name];
         if (v) { st.bph = v[0]; st.gap = v[1]; }
       }
+      stopRate = s.stops || null;
       for (const b of document.querySelectorAll("#slots button"))
         b.setAttribute("aria-selected", String(b.dataset.slot === slot));
       const days = s.n_days === 1 ? "1 day" : `last ${s.n_days} days`;
@@ -160,6 +213,8 @@
       try { localStorage.setItem("saajha-slot", slot); } catch (e) {}
       render();
     }
+
+    const optional = (url) => fetch(url, { cache: "no-cache" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
     fetch("stations.geojson")
       .then((r) => r.json())
@@ -169,23 +224,26 @@
           stops: f.properties.bus_stops_500m, bph: f.properties.buses_per_hour, gap: f.properties.gap,
         }));
         render();
-        map.fitBounds(L.featureGroup(Object.values(markers)).getBounds(), { padding: [20, 20] });
-        return fetch("service.json", { cache: "no-cache" });
+        map.fitBounds(L.featureGroup(Object.values(markers)).getBounds(), { padding: [20, 20], animate: false });
+        return Promise.all([optional("service.json"), optional("nearby.json")]);
       })
-      .then((r) => (r && r.ok ? r.json() : null))
-      .then((service) => {
-        if (!service || !service.slots) return;   // no automatic data yet: keep the original snapshot
-        const available = Object.keys(service.slots);
-        if (!available.length) return;
-        $("slots").classList.remove("hidden");
-        for (const b of document.querySelectorAll("#slots button")) {
-          b.disabled = !available.includes(b.dataset.slot);
-          b.onclick = () => useSlot(service, b.dataset.slot);
+      .then(([service, near]) => {
+        nearby = near;
+        if (service && service.slots && Object.keys(service.slots).length) {
+          const available = Object.keys(service.slots);
+          $("slots").classList.remove("hidden");
+          for (const b of document.querySelectorAll("#slots button")) {
+            b.disabled = !available.includes(b.dataset.slot);
+            b.onclick = () => useSlot(service, b.dataset.slot);
+          }
+          let saved = null;
+          try { saved = localStorage.getItem("saajha-slot"); } catch (e) {}
+          const first = available.includes(saved) ? saved : ["morning", "midday", "night"].find((x) => available.includes(x));
+          useSlot(service, first);
+        } else {
+          render();
         }
-        let saved = null;
-        try { saved = localStorage.getItem("saajha-slot"); } catch (e) {}
-        const first = available.includes(saved) ? saved : ["morning", "midday", "night"].find((x) => available.includes(x));
-        useSlot(service, first);
+        if (location.hash) openStation(decodeURIComponent(location.hash.slice(1)));
       })
       .catch(() => {
         if (!stations.length) $("worst").innerHTML = "<li>Could not load station data.</li>";
